@@ -212,6 +212,22 @@ textarea.in{resize:vertical;min-height:90px;line-height:1.45}
 .pbox .opt.no{background:rgba(240,122,106,.25);border-color:#F07A6A}
 .pbox .in{background:transparent;color:var(--board-ink);border-color:color-mix(in srgb,var(--board-ink) 30%,transparent)}
 .pc1{--pc:#F07A6A} .pc2{--pc:#73A2E6} .pc3{--pc:#F2CF5B}
+.duel-arena{touch-action:manipulation;-webkit-user-select:none;user-select:none}
+#v-duel:fullscreen{background:var(--board);overflow:auto;padding:12px}
+#v-duel:fullscreen .board{min-height:calc(100vh - 24px);box-sizing:border-box}
+.adisp{min-height:52px;border-radius:12px;border:2px solid var(--pc);background:rgba(0,0,0,.18);display:flex;align-items:center;padding:6px 14px;font-family:var(--f-display);font-size:28px;font-weight:600;color:var(--board-ink);letter-spacing:.02em;overflow:hidden;word-break:break-all}
+.adisp .ph{font-size:15px;font-weight:500;opacity:.55;letter-spacing:0}
+.adisp.ok{border-color:#55C487;background:rgba(85,196,135,.25)} .adisp.no{border-color:#F07A6A;background:rgba(240,122,106,.25)}
+.kpad{display:grid;gap:6px;touch-action:manipulation}
+.kpad.knum{grid-template-columns:repeat(3,1fr)} .kpad.kabc{grid-template-columns:repeat(6,1fr)}
+.kk{min-height:52px;border-radius:10px;border:1px solid color-mix(in srgb,var(--board-ink) 28%,transparent);background:rgba(255,255,255,.07);color:var(--board-ink);font-family:var(--f-display);font-size:22px;font-weight:600;cursor:pointer;touch-action:manipulation;padding:0}
+.kabc .kk{min-height:44px;font-size:19px}
+.kk.down,.kk:active{background:var(--pc);color:#1B2540;transform:scale(.96)}
+.kk.kok{background:var(--pc);color:#1B2540} .kabc .kok{grid-column:span 2} .kabc .kdel{grid-column:span 2}
+.kk.kdel{background:rgba(0,0,0,.2)}
+.pbox .opt{touch-action:manipulation}
+.dhint{font-size:13px;margin:14px 0 0}
+@media (max-width:760px){ .players{grid-template-columns:1fr!important} }
 .pbox{border-color:var(--pc)}
 .pbox .pn{font-weight:700;color:var(--pc);display:flex;justify-content:space-between}
 .road i.pc1,.road i.pc2,.road i.pc3{background:var(--pc)}
@@ -740,9 +756,50 @@ function startDuel(){
   S.duel.players.forEach(p=>nextDuelQ(p));
   rArena();
 }
-function nextDuelQ(p){ if(!p.deck.length) p.deck=shuffle(S.duel.pool); const q=p.deck.pop(); p.q={...q, shown: q.type==="input"?null:shuffle(q.options||[])}; p.lock=false; }
+function nextDuelQ(p){ if(!p.deck.length) p.deck=shuffle(S.duel.pool); const q=p.deck.pop(); p.q={...q, shown: q.type==="input"?null:shuffle(q.options||[])}; p.lock=false; p.typed=""; }
+/* Har bir o'quvchining o'z tugmalari: bir vaqtda bosish (multi-touch) va klaviatura zonalari */
+const DUEL_KEYS=[["1","2","3","4"],["7","8","9","0"],["V","B","N","M"]];
+const ABC=["a","b","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","x","y","z","o‘","g‘","-","␣"];
+const isNumQ = q => /^\d+$/.test(String(q.answer).trim());
+function kpadHTML(i,q){
+  const keys = isNumQ(q) ? ["1","2","3","4","5","6","7","8","9","⌫","0","OK"] : [...ABC,"⌫","OK"];
+  return `<div class="kpad ${isNumQ(q)?"knum":"kabc"}" data-kp="${i}">${keys.map(k=>`<button type="button" class="kk ${k==="OK"?"kok":k==="⌫"?"kdel":""}" data-k="${k}" aria-label="${k==="␣"?"bo‘sh joy":k==="⌫"?"o‘chirish":k}">${k}</button>`).join("")}</div>`;
+}
+function boxHTML(i){
+  const D=S.duel, p=D.players[i], q=p.q, keys=DUEL_KEYS[i];
+  const body = q.type==="input"
+    ? `<div class="adisp" id="dIn${i}" aria-live="polite">${p.typed?esc(p.typed):`<span class="ph">Javobni tugmalar bilan yozing</span>`}</div>${p.lock?"":kpadHTML(i,q)}`
+    : `<div class="opts" style="grid-template-columns:1fr 1fr">${q.shown.map((o,k)=>`<button class="opt" type="button" data-p="${i}" data-o="${esc(o)}" ${p.lock?"disabled":""}><span class="k">${keys[k]||k+1}</span><span>${esc(o)}</span></button>`).join("")}</div>`;
+  return `<div class="pbox pc${i+1}" id="pb${i}"><div class="pn"><span>${esc(p.name)}</span><span class="num">${p.score}/${D.target}</span></div><div class="pq">${esc(q.q)}</div>${body}<div class="status" id="pf${i}" style="min-height:20px;color:var(--chalk)">${esc(p.fb)}</div></div>`;
+}
+function bindBox(i){
+  const box=$("#pb"+i); if(!box) return;
+  $$(".opt",box).forEach(b=>{
+    b.addEventListener("pointerup", e=>{ e.preventDefault(); duelAnswer(i, b.dataset.o, b); });
+    b.addEventListener("click", e=>{ if(e.detail===0) duelAnswer(i, b.dataset.o, b); });
+  });
+  const kp=$(".kpad",box);
+  if (kp) $$(".kk",kp).forEach(b=>{
+    b.addEventListener("pointerdown", e=>{ e.preventDefault(); b._pd=Date.now(); b.classList.add("down"); duelKey(i, b.dataset.k); });
+    const up=()=>b.classList.remove("down");
+    b.addEventListener("pointerup", up); b.addEventListener("pointerleave", up); b.addEventListener("pointercancel", up);
+    b.addEventListener("click", e=>{ if(!b._pd || Date.now()-b._pd>700) duelKey(i, b.dataset.k); });
+  });
+}
+function renderBox(i){ const old=$("#pb"+i); if(!old) return; old.outerHTML=boxHTML(i); bindBox(i); }
+function renderTrack(){
+  const D=S.duel, t=$("#v-duel .track"); if(!t) return;
+  t.innerHTML = D.players.map((p,i)=>`<div class="lane"><b class="pc${i+1}" style="color:var(--pc)">${esc(p.name)}</b><div class="road"><i class="pc${i+1}" style="width:${p.score/D.target*100}%"></i></div><b class="num" style="text-align:right">${p.score}</b></div>`).join("");
+}
+function duelKey(i,k){
+  const D=S.duel, p=D&&D.players[i]; if(!p||p.lock||D.winner) return;
+  if (k==="OK"){ if(p.typed.trim()) duelAnswer(i, p.typed); return; }
+  if (k==="⌫") p.typed=p.typed.slice(0,-1);
+  else if (p.typed.length<24) p.typed += (k==="␣"?" ":k);
+  const d=$("#dIn"+i); if(d) d.innerHTML = p.typed?esc(p.typed):`<span class="ph">Javobni tugmalar bilan yozing</span>`;
+}
 function rArena(){
-  const D=S.duel, keys="ABCD";
+  const D=S.duel;
   if (D.winner){
     $("#v-duel").innerHTML = `<div class="board"><div class="winner">
       <span class="eyebrow" style="color:var(--chalk)">${esc(D.title)}</span>
@@ -751,37 +808,42 @@ function rArena(){
       <div class="row" style="justify-content:center"><button class="btn sun" type="button" id="wAgain">Qayta bellashish</button><button class="btn ghost" style="color:var(--board-ink);border-color:rgba(255,255,255,.3)" type="button" id="wSetup">Sozlamalarga qaytish</button></div>
     </div></div>${sign()}`;
     $("#wAgain").onclick=()=>startDuel();
-    $("#wSetup").onclick=()=>{ S.duel=null; rDuel(); };
+    $("#wSetup").onclick=()=>{ if(document.fullscreenElement) document.exitFullscreen().catch(()=>{}); S.duel=null; rDuel(); };
     return;
   }
-  const lanes = D.players.map((p,i)=>`<div class="lane"><b class="pc${i+1}" style="color:var(--pc)">${esc(p.name)}</b><div class="road"><i class="pc${i+1}" style="width:${p.score/D.target*100}%"></i></div><b class="num" style="text-align:right">${p.score}</b></div>`).join("");
-  const boxes = D.players.map((p,i)=>{
-    const q=p.q;
-    const body = q.type==="input"
-      ? `<form class="ansrow" data-pf="${i}"><input class="in" id="dIn${i}" autocomplete="off" placeholder="Javob" aria-label="${esc(p.name)} javobi" ${p.lock?"disabled":""}><button class="btn sun sm" type="submit" ${p.lock?"disabled":""}>OK</button></form>`
-      : `<div class="opts" style="grid-template-columns:1fr 1fr">${q.shown.map((o,k)=>`<button class="opt" type="button" data-p="${i}" data-o="${esc(o)}" ${p.lock?"disabled":""}><span class="k">${keys[k]||k+1}</span><span>${esc(o)}</span></button>`).join("")}</div>`;
-    return `<div class="pbox pc${i+1}" id="pb${i}"><div class="pn"><span>${esc(p.name)}</span><span class="num">${p.score}/${D.target}</span></div><div class="pq">${esc(q.q)}</div>${body}<div class="status" id="pf${i}" style="min-height:20px;color:var(--chalk)">${p.fb}</div></div>`;
-  }).join("");
-  $("#v-duel").innerHTML = `<div class="board">
-    <div class="row" style="justify-content:space-between"><div><span class="eyebrow" style="color:var(--chalk)">Duel · marra ${D.target} ball</span><h2 style="font-size:22px">${esc(D.title)}</h2></div><button class="btn ghost sm" style="color:var(--board-ink);border-color:rgba(255,255,255,.3)" type="button" id="dStop">To‘xtatish</button></div>
-    <div class="track">${lanes}</div>
-    <div class="players" style="grid-template-columns:repeat(auto-fit,minmax(${D.players.length===3?240:280}px,1fr))">${boxes}</div>
+  const n=D.players.length;
+  $("#v-duel").innerHTML = `<div class="board duel-arena">
+    <div class="row" style="justify-content:space-between"><div><span class="eyebrow" style="color:var(--chalk)">Duel · marra ${D.target} ball</span><h2 style="font-size:22px">${esc(D.title)}</h2></div>
+      <div class="row"><button class="btn ghost sm" style="color:var(--board-ink);border-color:rgba(255,255,255,.3)" type="button" id="dFull">⛶ To‘liq ekran</button><button class="btn ghost sm" style="color:var(--board-ink);border-color:rgba(255,255,255,.3)" type="button" id="dStop">To‘xtatish</button></div></div>
+    <div class="track"></div>
+    <div class="players" style="grid-template-columns:repeat(${n},minmax(0,1fr))">${D.players.map((p,i)=>boxHTML(i)).join("")}</div>
+    <p class="muted dhint">Har kim o‘z rangidagi oynada bir vaqtda javob beradi. Klaviaturada: ${D.players.map((p,i)=>`${esc(p.name)} — ${DUEL_KEYS[i].join(" ")}`).join(" · ")}</p>
   </div>${sign()}`;
-  $("#dStop").onclick=()=>{ S.duel=null; rDuel(); };
-  $$("#v-duel .opt").forEach(b=>b.onclick=()=>duelAnswer(+b.dataset.p, b.dataset.o, b));
-  $$("#v-duel [data-pf]").forEach(f=>f.onsubmit=e=>{ e.preventDefault(); const i=+f.dataset.pf, v=$("#dIn"+i).value; if(v.trim()) duelAnswer(i,v); });
+  renderTrack();
+  D.players.forEach((p,i)=>bindBox(i));
+  $("#dStop").onclick=()=>{ if(document.fullscreenElement) document.exitFullscreen().catch(()=>{}); S.duel=null; rDuel(); };
+  $("#dFull").onclick=()=>{ const el=$("#v-duel"); if(document.fullscreenElement) document.exitFullscreen().catch(()=>{}); else if(el.requestFullscreen) el.requestFullscreen().catch(()=>{}); };
 }
+document.addEventListener("keydown", e=>{
+  const D=S.duel; if(!D||!D.on||D.winner||$("#v-duel").hidden) return;
+  if (e.target.closest && e.target.closest("input,textarea,select")) return;
+  const key=e.key.length===1?e.key.toUpperCase():e.key;
+  D.players.forEach((p,i)=>{
+    const k=DUEL_KEYS[i].indexOf(key); if(k<0||p.q.type==="input"||p.lock) return;
+    const btn=$$("#pb"+i+" .opt")[k]; if(btn){ e.preventDefault(); duelAnswer(i, btn.dataset.o, btn); }
+  });
+});
 function duelAnswer(i, v, btn){
   const D=S.duel, p=D.players[i]; if (p.lock||D.winner) return; p.lock=true;
   const ok=isRight(p.q, v); recordAnswer(p.q.lessonId, ok);
-  const box=$("#pb"+i);
-  $$(".opt",box).forEach(b=>{ b.disabled=true; if(norm(b.dataset.o)===norm(p.q.answer)) b.classList.add("ok"); });
-  if (btn && !ok) btn.classList.add("no");
-  if (!ok) box.classList.add("shake");
   if (ok){ p.score++; p.fb="To‘g‘ri! Bir qadam oldinga."; } else p.fb=`Xato. To‘g‘ri javob: ${p.q.answer}`;
-  $("#pf"+i).textContent=p.fb;
+  renderBox(i); renderTrack();
+  const box=$("#pb"+i);
+  $$(".opt",box).forEach(b=>{ if(norm(b.dataset.o)===norm(p.q.answer)) b.classList.add("ok"); if(!ok && b.dataset.o===v) b.classList.add("no"); });
+  const d=$("#dIn"+i); if(d) d.classList.add(ok?"ok":"no");
+  if (!ok) box.classList.add("shake");
   if (p.score>=D.target){ D.winner=p.name; confetti(); setTimeout(rArena, 500); return; }
-  setTimeout(()=>{ if(S.duel!==D||D.winner) return; nextDuelQ(p); p.fb=""; rArena(); }, ok?900:1700);
+  setTimeout(()=>{ if(S.duel!==D||D.winner) return; nextDuelQ(p); p.fb=""; renderBox(i); }, ok?900:1700);
 }
 function confetti(){
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
